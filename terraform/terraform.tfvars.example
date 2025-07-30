@@ -1,0 +1,18 @@
+# Example Terraform Variables File
+# Copy this file to terraform.tfvars and fill in your actual values
+
+# AWS Region
+aws_region = "us-east-1"
+
+# Email Configuration for Contact Form
+# These email addresses MUST be verified in AWS SES before they will work
+sender_email = "noreply@yourdomain.com"        # Email address that will send the contact form emails
+recipient_email = "contact@yourdomain.com"     # Email address that will receive the contact form submissions
+
+# Alternative: Use your personal email for both (easier for testing)
+# sender_email = "your-email@gmail.com"
+# recipient_email = "your-email@gmail.com"
+
+# Other variables (if needed for your existing setup)
+# project_name = "juvenile-immigration-api"
+# environment = "production"

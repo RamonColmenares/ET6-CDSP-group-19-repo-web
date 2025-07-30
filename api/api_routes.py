@@ -1,8 +1,11 @@
 """
 API route handlers for the juvenile immigration API
 """
-from flask import jsonify
+from flask import jsonify, request
 from datetime import datetime
+import boto3
+from botocore.exceptions import ClientError
+import os
 
 try:
     from .data_loader import load_data, download_raw_files_from_google_drive, save_to_cache
@@ -241,3 +244,140 @@ def basic_statistics():
         
     except Exception as e:
         return jsonify({"error": f"Server error: {str(e)}"}), 500
+
+def send_contact_email():
+    """Handle contact form submission and send email using AWS SES"""
+    try:
+        # Get JSON data from request
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+        
+        # Validate required fields
+        required_fields = ['firstName', 'lastName', 'email', 'message']
+        for field in required_fields:
+            if not data.get(field):
+                return jsonify({"error": f"Field '{field}' is required"}), 400
+        
+        # AWS SES configuration
+        aws_region = os.getenv('AWS_REGION', 'us-east-1')
+        sender_email = os.getenv('SENDER_EMAIL')
+        recipient_email = os.getenv('RECIPIENT_EMAIL')
+        
+        if not all([sender_email, recipient_email]):
+            return jsonify({"error": "Email configuration not complete. Set SENDER_EMAIL and RECIPIENT_EMAIL environment variables"}), 500
+        
+        # Initialize SES client
+        ses_client = boto3.client(
+            'ses',
+            region_name=aws_region,
+            aws_access_key_id=os.getenv('AWS_ACCESS_KEY_ID'),
+            aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY')
+        )
+        
+        # Create email content
+        subject = f"Nuevo mensaje de contacto: {data.get('subject', 'Sin asunto')}"
+        
+        # Email body in HTML format
+        html_body = f"""
+        <html>
+        <head></head>
+        <body>
+            <h2>Nuevo mensaje desde el formulario de contacto</h2>
+            <table style="border-collapse: collapse; width: 100%;">
+                <tr>
+                    <td style="border: 1px solid #ddd; padding: 8px; font-weight: bold;">Nombre:</td>
+                    <td style="border: 1px solid #ddd; padding: 8px;">{data['firstName']} {data['lastName']}</td>
+                </tr>
+                <tr>
+                    <td style="border: 1px solid #ddd; padding: 8px; font-weight: bold;">Email:</td>
+                    <td style="border: 1px solid #ddd; padding: 8px;">{data['email']}</td>
+                </tr>
+                <tr>
+                    <td style="border: 1px solid #ddd; padding: 8px; font-weight: bold;">Organización:</td>
+                    <td style="border: 1px solid #ddd; padding: 8px;">{data.get('organization', 'No especificada')}</td>
+                </tr>
+                <tr>
+                    <td style="border: 1px solid #ddd; padding: 8px; font-weight: bold;">Asunto:</td>
+                    <td style="border: 1px solid #ddd; padding: 8px;">{data.get('subject', 'No especificado')}</td>
+                </tr>
+                <tr>
+                    <td style="border: 1px solid #ddd; padding: 8px; font-weight: bold;">Newsletter:</td>
+                    <td style="border: 1px solid #ddd; padding: 8px;">{'Sí' if data.get('newsletter') else 'No'}</td>
+                </tr>
+            </table>
+            
+            <h3>Mensaje:</h3>
+            <div style="border: 1px solid #ddd; padding: 10px; background-color: #f9f9f9; white-space: pre-wrap;">{data['message']}</div>
+            
+            <p style="color: #666; font-size: 12px; margin-top: 20px;">
+                Enviado el: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+            </p>
+        </body>
+        </html>
+        """
+        
+        # Plain text version
+        text_body = f"""
+Nuevo mensaje desde el formulario de contacto:
+
+Nombre: {data['firstName']} {data['lastName']}
+Email: {data['email']}
+Organización: {data.get('organization', 'No especificada')}
+Asunto: {data.get('subject', 'No especificado')}
+
+Mensaje:
+{data['message']}
+
+Newsletter: {'Sí' if data.get('newsletter') else 'No'}
+
+Enviado el: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+        """
+        
+        # Send email using SES
+        response = ses_client.send_email(
+            Source=sender_email,
+            Destination={
+                'ToAddresses': [recipient_email],
+                'CcAddresses': [],
+                'BccAddresses': []
+            },
+            Message={
+                'Subject': {
+                    'Data': subject,
+                    'Charset': 'UTF-8'
+                },
+                'Body': {
+                    'Text': {
+                        'Data': text_body,
+                        'Charset': 'UTF-8'
+                    },
+                    'Html': {
+                        'Data': html_body,
+                        'Charset': 'UTF-8'
+                    }
+                }
+            }
+        )
+        
+        return jsonify({
+            "message": "Email sent successfully", 
+            "messageId": response['MessageId']
+        }), 200
+        
+    except ClientError as e:
+        error_code = e.response['Error']['Code']
+        error_message = e.response['Error']['Message']
+        print(f"AWS SES Error: {error_code} - {error_message}")
+        
+        if error_code == 'MessageRejected':
+            return jsonify({"error": "Email was rejected. Please check that the sender email is verified in SES."}), 400
+        elif error_code == 'MailFromDomainNotVerified':
+            return jsonify({"error": "Sender domain not verified in SES."}), 400
+        else:
+            return jsonify({"error": f"AWS SES Error: {error_message}"}), 500
+            
+    except Exception as e:
+        print(f"Error sending email: {str(e)}")
+        return jsonify({"error": f"Failed to send email: {str(e)}"}), 500

@@ -18,7 +18,8 @@ try:
         chi_square_analysis,
         outcome_percentages,
         countries_chart,
-        basic_statistics
+        basic_statistics,
+        send_contact_email
     )
     from .config import DEBUG
 except ImportError:
@@ -33,7 +34,8 @@ except ImportError:
         chi_square_analysis,
         outcome_percentages,
         countries_chart,
-        basic_statistics
+        basic_statistics,
+        send_contact_email
     )
     from config import DEBUG
 
@@ -101,6 +103,10 @@ def countries_chart_route():
 @app.route('/api/data/basic-stats')
 def basic_statistics_route():
     return basic_statistics()
+
+@app.route('/api/contact', methods=['POST'])
+def contact_route():
+    return send_contact_email()
 
 # Vercel serverless function handler
 def handler(request, context):
